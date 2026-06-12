@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111827" />
+    <meta name="description" content="APK Installer Web CHK - outil personnel pour préparer l'installation manuelle d'APK depuis Android." />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="style.css" />
+    <title>APK Installer Web CHK</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero card">
+        <div class="badge">CHK Tools</div>
+        <h1>APK Installer Web CHK</h1>
+        <p>
+          Sélectionne une APK ou un ZIP contenant plusieurs APK. L'application prépare les fichiers, puis Android te demandera de valider l'installation manuellement.
+        </p>
+      </section>
+
+      <section class="card warning-card">
+        <h2>Important Android</h2>
+        <p>
+          Une application web ne peut pas installer une APK en silence. Elle prépare le fichier, puis tu dois confirmer l'installation dans Android.
+        </p>
+      </section>
+
+      <section class="card upload-card">
+        <label class="file-zone" for="fileInput">
+          <span class="file-icon">📦</span>
+          <strong>Choisir une APK ou un ZIP</strong>
+          <small>Formats acceptés : .apk, .zip</small>
+        </label>
+        <input id="fileInput" type="file" accept=".apk,.zip,application/vnd.android.package-archive,application/zip" />
+
+        <div class="actions-row">
+          <button id="resetButton" class="secondary" type="button">Réinitialiser</button>
+          <button id="installPwaButton" class="secondary" type="button" hidden>Installer cette web app</button>
+        </div>
+      </section>
+
+      <section id="statusBox" class="status-box" aria-live="polite"></section>
+
+      <section class="card" id="resultsCard" hidden>
+        <div class="section-title">
+          <h2>APK détectées</h2>
+          <span id="apkCount">0</span>
+        </div>
+        <div id="apkList" class="apk-list"></div>
+      </section>
+
+      <section class="card guide-card">
+        <h2>Mode d'emploi</h2>
+        <ol>
+          <li>Ouvre ce site sur ton téléphone Android.</li>
+          <li>Choisis une APK ou un ZIP.</li>
+          <li>Appuie sur <strong>Télécharger / ouvrir</strong>.</li>
+          <li>Android te demandera l'autorisation d'installation.</li>
+          <li>Valide manuellement avec <strong>Installer</strong>.</li>
+        </ol>
+      </section>
+    </main>
+
+    <template id="apkItemTemplate">
+      <article class="apk-item">
+        <div>
+          <h3 class="apk-name"></h3>
+          <p class="apk-meta"></p>
+        </div>
+        <div class="apk-actions">
+          <a class="install-link" href="#" download> Télécharger / ouvrir </a>
+          <button class="copy-name secondary" type="button">Copier nom</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

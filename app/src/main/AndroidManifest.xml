@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="APK Installer CHK v2"
+        android:label="APK Installer CHK v3"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
 

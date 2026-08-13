@@ -34,9 +34,9 @@ public final class MainActivity extends Activity {
     private static final String URL =
             "https://github.com/Chasmet/Modeliseur-3d/releases/download/v9.2-thin/Modeliseur-3D-V9.2-Thin.apk";
     private static final String FILE_NAME = "Modeliseur-3D-V9.2-Thin.apk";
-    private static final long EXPECTED_SIZE = 11_995_051L;
+    private static final long EXPECTED_SIZE = 11_999_147L;
     private static final String EXPECTED_SHA256 =
-            "af0f7ed5a01ab822958426ec16422121e2e674350677af9c0f3135e409fae10c";
+            "15a6b9fbdb2736bcefa221c297da0ca4e62667a63e198e364247ab82f9af6d8b";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private ProgressBar progress;
@@ -64,17 +64,17 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(22), dp(30), dp(22), dp(28));
         scroll.addView(root);
 
-        root.addView(text("CHK TOOLS • INSTALLATEUR V3", 13, Color.rgb(56, 189, 248), true));
+        root.addView(text("CHK TOOLS • INSTALLATEUR V3.1", 13, Color.rgb(56, 189, 248), true));
         TextView title = text("Installer Modeliseur 3D V9.2", 30, Color.WHITE, true);
         title.setPadding(0, dp(16), 0, dp(8));
         root.addView(title);
 
         root.addView(text(
-                "Cette version évite le fichier bloqué de 936 Mo. L'APK principale ne fait qu'environ 12 Mo. Une fois installée, elle télécharge séparément ses moteurs IA avec reprise automatique, puis fonctionne hors ligne.",
+                "APK légère d'environ 12 Mo. Les gros moteurs IA restent séparés et sont conservés sur le téléphone après installation.",
                 16, Color.rgb(203, 213, 225), false));
 
         TextView tech = text(
-                "V9.2 Thin • SAM XL0 1024 • DA3 392 • grille dense • quadrupède 4 appuis",
+                "Correctif STRICT • SAM XL0 réellement obligatoire • DA3 392 • kart + personnage : triple passe SAM",
                 14, Color.rgb(148, 163, 184), false);
         tech.setPadding(0, dp(14), 0, dp(18));
         root.addView(tech);
@@ -89,7 +89,7 @@ public final class MainActivity extends Activity {
         root.addView(status);
 
         action = new Button(this);
-        action.setText("Télécharger et installer V9.2");
+        action.setText("Télécharger et installer le correctif V9.2");
         action.setTextSize(16);
         action.setAllCaps(false);
         action.setGravity(Gravity.CENTER);
@@ -100,7 +100,7 @@ public final class MainActivity extends Activity {
         root.addView(action);
 
         TextView instructions = text(
-                "Après installation : ouvre Modeliseur 3D, choisis le mode 3D, puis appuie sur « Télécharger / reprendre les IA ». Les gros modèles sont vérifiés par SHA-256 et les données déjà reçues restent conservées en cas de coupure.",
+                "Après installation, ouvre Modeliseur 3D. Si les IA étaient déjà présentes sur ton téléphone, elles ne seront pas retéléchargées : Android conserve les fichiers privés lors d'une mise à jour. Pour kart + personnage, choisis la famille « Personnage + véhicule / objet composé » si Auto hésite.",
                 15, Color.rgb(203, 213, 225), false);
         instructions.setPadding(dp(14), dp(18), dp(14), dp(14));
         root.addView(instructions);
@@ -133,7 +133,7 @@ public final class MainActivity extends Activity {
         }
         try {
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(URL));
-            request.setTitle("Modeliseur 3D V9.2 Thin");
+            request.setTitle("Modeliseur 3D V9.2 Thin — strict");
             request.setDescription("APK légère — environ 12 Mo");
             request.setMimeType("application/vnd.android.package-archive");
             request.setAllowedOverMetered(true);
@@ -206,7 +206,7 @@ public final class MainActivity extends Activity {
                 }
                 runOnUiThread(() -> {
                     action.setEnabled(true);
-                    setStatus("APK V9.2 vérifiée. Ouverture de l'installation Android…");
+                    setStatus("APK stricte vérifiée. Ouverture de l'installation Android…");
                     installApk(apk);
                 });
             } catch (Exception error) {

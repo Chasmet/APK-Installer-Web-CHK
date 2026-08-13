@@ -35,7 +35,7 @@ jobs:
           gradle-version: '8.7'
 
       - name: Compiler APK réel
-        run: gradle clean assembleDebug
+        run: gradle -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true clean assembleDebug
 
       - name: Vérifier APK
         shell: bash

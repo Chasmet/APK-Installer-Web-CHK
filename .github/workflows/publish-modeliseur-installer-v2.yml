@@ -1,4 +1,4 @@
-name: Publier APK Installer CHK v2 Modeliseur
+name: Publier APK Installer CHK v3 Modeliseur V9.2
 
 on:
   push:
@@ -45,16 +45,18 @@ jobs:
           test -f "$APK"
           test "$(stat -c%s "$APK")" -gt 50000
           mkdir -p release
-          cp "$APK" release/APK-Installer-CHK-v2-Modeliseur.apk
-          sha256sum release/APK-Installer-CHK-v2-Modeliseur.apk | tee release/SHA256.txt
+          cp "$APK" release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk
+          sha256sum release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk | tee release/SHA256.txt
+          stat -c%s release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk | tee release/SIZE.txt
 
       - name: Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: APK-Installer-CHK-v2-Modeliseur
+          name: APK-Installer-CHK-v3-Modeliseur-V9.2
           path: |
-            release/APK-Installer-CHK-v2-Modeliseur.apk
+            release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk
             release/SHA256.txt
+            release/SIZE.txt
           retention-days: 30
 
       - name: Publier Release directe
@@ -63,10 +65,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release delete installer-modeliseur-v2 --cleanup-tag -y >/dev/null 2>&1 || true
-          gh release create installer-modeliseur-v2 \
-            release/APK-Installer-CHK-v2-Modeliseur.apk \
+          gh release delete installer-modeliseur-v3 --cleanup-tag -y >/dev/null 2>&1 || true
+          gh release create installer-modeliseur-v3 \
+            release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk \
             release/SHA256.txt \
-            --title "APK Installer CHK v2 — Modeliseur 3D" \
-            --notes "Petit installateur Android natif. Télécharge Modeliseur 3D V9.1 via DownloadManager, affiche la progression, vérifie exactement 936057609 octets et le SHA-256 9f9d2b3c40b000ddadd5d632259ab0e3ffee2390cf48ff8072961b5329b5fe81 avant d'ouvrir l'installation Android." \
+            release/SIZE.txt \
+            --title "APK Installer CHK v3 — Modeliseur V9.2 Thin" \
+            --notes "Installateur Android léger dédié à Modeliseur V9.2 Thin. Il télécharge l'APK vérifiée de 11995051 octets via DownloadManager et contrôle le SHA-256 af0f7ed5a01ab822958426ec16422121e2e674350677af9c0f3135e409fae10c avant installation. Les gros moteurs IA sont ensuite téléchargés séparément par Modeliseur avec reprise automatique." \
             --prerelease

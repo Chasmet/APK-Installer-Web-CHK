@@ -1,4 +1,4 @@
-name: Publier APK Installer CHK v3 Modeliseur V9.2
+name: Publier APK Installer CHK v3.3 Modeliseur V9.5
 
 on:
   push:
@@ -26,8 +26,8 @@ jobs:
       - name: Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Android 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Android 34
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
@@ -45,16 +45,16 @@ jobs:
           test -f "$APK"
           test "$(stat -c%s "$APK")" -gt 50000
           mkdir -p release
-          cp "$APK" release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk
-          sha256sum release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk | tee release/SHA256.txt
-          stat -c%s release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk | tee release/SIZE.txt
+          cp "$APK" release/APK-Installer-CHK-v3.3-Modeliseur-V9.5.apk
+          sha256sum release/APK-Installer-CHK-v3.3-Modeliseur-V9.5.apk | tee release/SHA256.txt
+          stat -c%s release/APK-Installer-CHK-v3.3-Modeliseur-V9.5.apk | tee release/SIZE.txt
 
       - name: Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: APK-Installer-CHK-v3-Modeliseur-V9.2
+          name: APK-Installer-CHK-v3.3-Modeliseur-V9.5
           path: |
-            release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk
+            release/APK-Installer-CHK-v3.3-Modeliseur-V9.5.apk
             release/SHA256.txt
             release/SIZE.txt
           retention-days: 30
@@ -67,9 +67,9 @@ jobs:
           set -euo pipefail
           gh release delete installer-modeliseur-v3 --cleanup-tag -y >/dev/null 2>&1 || true
           gh release create installer-modeliseur-v3 \
-            release/APK-Installer-CHK-v3-Modeliseur-V9.2.apk \
+            release/APK-Installer-CHK-v3.3-Modeliseur-V9.5.apk \
             release/SHA256.txt \
             release/SIZE.txt \
-            --title "APK Installer CHK v3 — Modeliseur V9.2 Thin" \
-            --notes "Installateur Android léger dédié à Modeliseur V9.2 Thin. Il télécharge l'APK vérifiée de 11995051 octets via DownloadManager et contrôle le SHA-256 af0f7ed5a01ab822958426ec16422121e2e674350677af9c0f3135e409fae10c avant installation. Les gros moteurs IA sont ensuite téléchargés séparément par Modeliseur avec reprise automatique." \
+            --title "APK Installer CHK v3.3 — Modeliseur V9.5 Thin" \
+            --notes "Installateur Android dédié à Modeliseur V9.5 Thin Zero-Copy. Il télécharge directement en HTTPS l'APK de 12007339 octets avec reprise, progression réelle et contrôle SHA-256 05e04b9703375302d66ad3733a29a0a9e61a65609dd573498176760af5c4fa89 avant installation. Les modèles IA restent séparés, vérifiés et réutilisables hors ligne." \
             --prerelease

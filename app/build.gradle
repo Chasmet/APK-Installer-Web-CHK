@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'com.chk.apkinstaller'
-    compileSdk 35
+    compileSdk 34
 
     defaultConfig {
         applicationId 'com.chk.apkinstaller'
-        minSdk 23
-        targetSdk 35
+        minSdk 21
+        targetSdk 34
         versionCode 4
         versionName '3.3'
     }

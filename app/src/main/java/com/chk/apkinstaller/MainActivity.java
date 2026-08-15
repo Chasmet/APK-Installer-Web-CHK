@@ -32,11 +32,11 @@ import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final String URL =
-            "https://github.com/Chasmet/Modeliseur-3d/releases/download/v9.2-thin/Modeliseur-3D-V9.2-Thin.apk";
-    private static final String FILE_NAME = "Modeliseur-3D-V9.4-Memory-Safe-Thin.apk";
-    private static final long EXPECTED_SIZE = 11_999_147L;
+            "https://github.com/Chasmet/Modeliseur-3d/releases/download/v9.5-thin/Modeliseur-3D-V9.5-Thin.apk";
+    private static final String FILE_NAME = "Modeliseur-3D-V9.5-Thin.apk";
+    private static final long EXPECTED_SIZE = 12_007_339L;
     private static final String EXPECTED_SHA256 =
-            "83a72a7fdf7e26c698c80fbd06d5e334b42c209eb1333e2f5576f1aabeb36de7";
+            "05e04b9703375302d66ad3733a29a0a9e61a65609dd573498176760af5c4fa89";
     private static final int BUFFER_SIZE = 256 * 1024;
 
     private ProgressBar progress;
@@ -59,16 +59,16 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(text("CHK TOOLS • INSTALLATEUR V3.3", 13, Color.rgb(56, 189, 248), true));
-        TextView title = text("Installer Modeliseur 3D V9.4", 30, Color.WHITE, true);
+        TextView title = text("Installer Modeliseur 3D V9.5", 30, Color.WHITE, true);
         title.setPadding(0, dp(16), 0, dp(8));
         root.addView(title);
 
         root.addView(text(
-                "Téléchargement HTTPS direct intégré : plus de dépendance au DownloadManager Android. Reprise automatique, progression réelle et contrôle SHA-256.",
+                "Téléchargement HTTPS direct intégré : reprise automatique, progression réelle et contrôle SHA-256 avant installation.",
                 16, Color.rgb(203, 213, 225), false));
 
         TextView tech = text(
-                "V9.4 Memory-Safe • SAM XL0 1024 • 1 encodage lourd par vue • DA3 392 • grille dense",
+                "V9.5 Zero-Copy • SAM XL0 1024 • DA3 392 • grille dense • meshing mémoire-sûr",
                 14, Color.rgb(148, 163, 184), false);
         tech.setPadding(0, dp(14), 0, dp(18));
         root.addView(tech);
@@ -78,12 +78,12 @@ public final class MainActivity extends Activity {
         root.addView(progress, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(18)));
 
-        status = text("Prêt à télécharger les 12 Mo.", 15, Color.rgb(186, 230, 253), false);
+        status = text("Prêt à télécharger les 12 Mo de V9.5.", 15, Color.rgb(186, 230, 253), false);
         status.setPadding(0, dp(14), 0, dp(16));
         root.addView(status);
 
         action = new Button(this);
-        action.setText("Télécharger et installer V9.4");
+        action.setText("Télécharger et installer V9.5");
         action.setTextSize(16);
         action.setAllCaps(false);
         action.setGravity(Gravity.CENTER);
@@ -94,7 +94,7 @@ public final class MainActivity extends Activity {
         root.addView(action);
 
         TextView instructions = text(
-                "Après installation, ouvre Modeliseur 3D. Comme tu as désinstallé l'ancienne version, les gros modèles IA devront être téléchargés de nouveau dans Modeliseur. Ensuite teste « Personnage + véhicule / objet composé ».",
+                "Après installation, ouvre Modeliseur 3D. Si les modèles IA sont déjà présents, ils restent utilisables. Sinon l'application les téléchargera avec reprise et vérification. Pour valider V9.5, teste exactement le même « Personnage + véhicule / objet composé » qui saturait la mémoire.",
                 15, Color.rgb(203, 213, 225), false);
         instructions.setPadding(dp(14), dp(18), dp(14), dp(14));
         root.addView(instructions);
@@ -137,7 +137,7 @@ public final class MainActivity extends Activity {
                 ? "Reprise du téléchargement depuis " + formatBytes(partial.length()) + "…"
                 : "Connexion sécurisée à GitHub…");
 
-        new Thread(() -> downloadInternal(partial, target), "v94-direct-download").start();
+        new Thread(() -> downloadInternal(partial, target), "v95-direct-download").start();
     }
 
     private void downloadInternal(File partial, File target) {
@@ -279,8 +279,8 @@ public final class MainActivity extends Activity {
                 }
                 runOnUiThread(() -> {
                     action.setEnabled(true);
-                    action.setText("Installer V9.4 vérifiée");
-                    setStatus("APK V9.4 vérifiée. Ouverture de l'installation Android…");
+                    action.setText("Installer V9.5 vérifiée");
+                    setStatus("APK V9.5 vérifiée. Ouverture de l'installation Android…");
                     installApk(apk);
                 });
             } catch (Exception error) {
@@ -290,7 +290,7 @@ public final class MainActivity extends Activity {
                     setStatus("Vérification échouée : " + shortMessage(error));
                 });
             }
-        }, "v94-apk-verification").start();
+        }, "v95-apk-verification").start();
     }
 
     private void installApk(File apk) {

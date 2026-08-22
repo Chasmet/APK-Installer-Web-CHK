@@ -1,1 +1,1 @@
-Trigger APK build after workflow installation on main.
+Trigger CHK Binance Portfolio v3 build with private Supabase snapshot sync.

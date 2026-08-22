@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:theme="@style/AppTheme" android:label="CHK Binance">
+    <application android:theme="@style/AppTheme" android:label="CHK Binance" android:icon="@drawable/app_icon" android:roundIcon="@drawable/app_icon">
         <activity android:name=".MainActivityV3" android:screenOrientation="portrait" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

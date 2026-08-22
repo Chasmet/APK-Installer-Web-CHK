@@ -6,6 +6,11 @@ on:
     paths:
       - 'binance-portfolio-android/**'
       - '.github/workflows/build-binance-portfolio.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'binance-portfolio-android/**'
+      - '.github/workflows/build-binance-portfolio.yml'
 
 jobs:
   build:

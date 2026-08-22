@@ -10,6 +10,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <activity android:name=".MainActivityV5" android:screenOrientation="portrait" android:exported="false" />
 
         <receiver android:name=".AlertCheckReceiver" android:exported="false" />
         <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">

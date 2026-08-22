@@ -1,0 +1,12 @@
+{
+  "name": "chk-binance-mcp",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server5.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

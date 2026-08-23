@@ -7,7 +7,7 @@ import { URL } from 'node:url';
 
 const PORT = Number(process.env.PORT || 3000);
 const UPSTREAM_PORT = Number(process.env.V8_INTERNAL_PORT || (PORT + 10));
-const SERVER_VERSION = '9.1.0';
+const SERVER_VERSION = '9.2.0';
 const SIGNING_AUDIENCE = 'chk-crypto-signing';
 const EXPECTED_REPOSITORY = 'Chasmet/Binance-bybyt-';
 const EXPECTED_REF = 'refs/heads/main';
@@ -28,8 +28,8 @@ const signingConfigured = [KEYSTORE_B64, STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
 const here = path.dirname(fileURLToPath(import.meta.url));
 let child;
 function startUpstream() {
-  child = spawn(process.execPath, ['server-v8.mjs'], { cwd: here, env: { ...process.env, PORT: String(UPSTREAM_PORT), V6_MCP_INTERNAL_PORT: String(UPSTREAM_PORT + 1) }, stdio: ['ignore', 'inherit', 'inherit'] });
-  child.on('exit', (code, signal) => console.error(`v8 gateway exited code=${code} signal=${signal}`));
+  child = spawn(process.execPath, ['server-v10.mjs'], { cwd: here, env: { ...process.env, PORT: String(UPSTREAM_PORT), V10_UPSTREAM_PORT: String(UPSTREAM_PORT + 10) }, stdio: ['ignore', 'inherit', 'inherit'] });
+  child.on('exit', (code, signal) => console.error(`v10 canonical gateway exited code=${code} signal=${signal}`));
 }
 startUpstream();
 
@@ -40,7 +40,7 @@ function wait(ms){return new Promise(r=>setTimeout(r,ms));}
 function sha256(v){return crypto.createHash('sha256').update(String(v)).digest('hex');}
 function edgeUrl(slug){const u=new URL(EDGE_URL);u.pathname=u.pathname.replace(/\/chk-binance-workspace-latest\/?$/,`/${slug}`);return u.toString();}
 
-async function waitForUpstream(){let lastError;for(let attempt=0;attempt<80;attempt++){try{const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`,{headers:{accept:'application/json'}});if(r.ok)return;lastError=new Error(`v8_health_${r.status}`);}catch(e){lastError=e;}await wait(250);}throw lastError||new Error('v8_startup_timeout');}
+async function waitForUpstream(){let lastError;for(let attempt=0;attempt<80;attempt++){try{const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`,{headers:{accept:'application/json'}});if(r.ok)return;lastError=new Error(`v10_health_${r.status}`);}catch(e){lastError=e;}await wait(250);}throw lastError||new Error('v10_startup_timeout');}
 
 async function bootstrapDevice(body){
   if(!EDGE_URL||!SUPABASE_MCP_TOKEN) throw new Error('bootstrap_not_configured');
@@ -72,4 +72,4 @@ const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,`h
   return await proxy(req,res);
 }catch(e){console.error('v9_request_error',e?.message||e);return json(res,500,{error:'server_error',message:String(e?.message||e).slice(0,160)});}});
 
-try{await waitForUpstream();server.listen(PORT,'0.0.0.0',()=>console.log(`CHK Crypto Gateway v${SERVER_VERSION} listening on :${PORT}; deviceBootstrap=true; stableSigningConfigured=${signingConfigured}`));}catch(e){console.error(`CHK Crypto Gateway startup failed: ${e?.message||e}`);child.kill('SIGTERM');process.exit(1);}
+try{await waitForUpstream();server.listen(PORT,'0.0.0.0',()=>console.log(`CHK Crypto Gateway v${SERVER_VERSION} listening on :${PORT}; canonicalV10=true; deviceBootstrap=true; stableSigningConfigured=${signingConfigured}`));}catch(e){console.error(`CHK Crypto Gateway startup failed: ${e?.message||e}`);child.kill('SIGTERM');process.exit(1);}

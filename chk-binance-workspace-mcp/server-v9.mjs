@@ -7,7 +7,7 @@ import { URL } from 'node:url';
 
 const PORT = Number(process.env.PORT || 3000);
 const UPSTREAM_PORT = Number(process.env.V8_INTERNAL_PORT || (PORT + 10));
-const SERVER_VERSION = '9.0.1';
+const SERVER_VERSION = '9.0.2';
 const SIGNING_AUDIENCE = 'chk-crypto-signing';
 const EXPECTED_REPOSITORY = 'Chasmet/Binance-bybyt-';
 const EXPECTED_REF = 'refs/heads/main';
@@ -57,6 +57,27 @@ async function bodyText(req, max = 1_000_000) {
 
 function decodeBase64Url(value) {
   return Buffer.from(String(value).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForUpstream() {
+  let lastError;
+  for (let attempt = 0; attempt < 80; attempt++) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`, {
+        headers: { accept: 'application/json' },
+      });
+      if (response.ok) return;
+      lastError = new Error(`v8_health_${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await wait(250);
+  }
+  throw lastError || new Error('v8_startup_timeout');
 }
 
 let jwksCache = { expiresAt: 0, keys: [] };
@@ -172,7 +193,7 @@ async function proxy(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `https://${req.headers.host}`);
-    if (url.pathname === '/ci/android-signing') return handleSigning(req, res);
+    if (url.pathname === '/ci/android-signing') return await handleSigning(req, res);
     if (url.pathname === '/health') {
       const response = await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`);
       const upstream = await response.json();
@@ -183,13 +204,20 @@ const server = http.createServer(async (req, res) => {
         validationPrEnabled: Boolean(ALLOWED_PR_REF && ALLOWED_HEAD_REF),
       });
     }
-    return proxy(req, res);
+    return await proxy(req, res);
   } catch (error) {
     console.error('v9_request_error', error?.message || error);
     return json(res, 500, { error: 'server_error' });
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`CHK Crypto Gateway v${SERVER_VERSION} listening on :${PORT}; v8 on :${UPSTREAM_PORT}; stableSigningConfigured=${signingConfigured}; validationPrEnabled=${Boolean(ALLOWED_PR_REF && ALLOWED_HEAD_REF)}`);
-});
+try {
+  await waitForUpstream();
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`CHK Crypto Gateway v${SERVER_VERSION} listening on :${PORT}; v8 on :${UPSTREAM_PORT}; stableSigningConfigured=${signingConfigured}; validationPrEnabled=${Boolean(ALLOWED_PR_REF && ALLOWED_HEAD_REF)}`);
+  });
+} catch (error) {
+  console.error(`CHK Crypto Gateway startup failed: ${error?.message || error}`);
+  child.kill('SIGTERM');
+  process.exit(1);
+}

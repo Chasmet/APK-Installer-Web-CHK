@@ -1,10 +1,10 @@
 {
   "name": "chk-binance-workspace-mcp",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server-v5.mjs"
+    "start": "node server-v6.mjs"
   },
   "engines": {
     "node": ">=20"

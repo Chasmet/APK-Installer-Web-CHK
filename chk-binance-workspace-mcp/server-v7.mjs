@@ -8,7 +8,12 @@ import { URL } from 'node:url';
 const PORT = Number(process.env.PORT || 3000);
 const INTERNAL_PORT = Number(process.env.V6_MCP_INTERNAL_PORT || (PORT + 1));
 const MCP_LINK_TOKEN = process.env.MCP_LINK_TOKEN;
-const SERVER_VERSION = '7.0.0';
+const SERVER_VERSION = '7.1.0';
+const BLOCKED_WRITE_TOOLS = new Set([
+  'place_bybit_limit_order',
+  'place_bybit_market_order',
+  'cancel_bybit_order',
+]);
 
 if (!MCP_LINK_TOKEN) {
   console.error('Missing required environment variable: MCP_LINK_TOKEN');
@@ -111,6 +116,20 @@ function resultError(response) {
 
 function withExchange(items, exchange) {
   return (Array.isArray(items) ? items : []).map((item) => ({ exchange, ...item }));
+}
+
+function blockedWriteResult(message) {
+  return {
+    jsonrpc: '2.0',
+    id: message?.id ?? null,
+    result: {
+      isError: true,
+      content: [{
+        type: 'text',
+        text: 'Écriture Bybit directe désactivée. ChatGPT doit créer une proposition CHK Crypto ; seul l’utilisateur peut ensuite appuyer sur CONFIRMER dans l’APK avant l’envoi réel à Bybit EU Spot.',
+      }],
+    },
+  };
 }
 
 async function mergeReadTool(message, original) {
@@ -252,20 +271,29 @@ async function rpcOne(message) {
     const response = await v6Rpc(message);
     if (response?.result) {
       response.result.serverInfo = { name: 'chk-crypto-workspace', version: SERVER_VERSION };
-      response.result.instructions = 'CHK Crypto Workspace v7. The legacy visible read tools are compatibility-enhanced to return Binance + Bybit data so frozen ChatGPT app snapshots can still read Bybit. Native Bybit LIMIT/MARKET/cancel tools remain exposed by tools/list for refreshed full-MCP clients.';
+      response.result.instructions = 'CHK Crypto Workspace v7.1. Binance + Bybit read/analysis tools only. Direct Bybit LIMIT/MARKET/cancel writes are blocked at this gateway. Real orders must pass through a CHK Crypto proposal and the user confirmation button in the Android APK.';
     }
+    return response;
+  }
+
+  if (message.method === 'tools/list') {
+    const response = await v6Rpc(message);
+    const tools = Array.isArray(response?.result?.tools) ? response.result.tools : [];
+    if (response?.result) response.result.tools = tools.filter((tool) => !BLOCKED_WRITE_TOOLS.has(tool?.name));
     return response;
   }
 
   if (message.method === 'tools/call') {
     const name = String(message?.params?.name || '');
-    console.log(`[MCP v7] tools/call ${name}`);
+    console.log(`[MCP v7.1] tools/call ${name}`);
+    if (BLOCKED_WRITE_TOOLS.has(name)) return blockedWriteResult(message);
+
     const original = await v6Rpc(message);
     if (['get_portfolio_summary', 'list_assets', 'get_asset', 'get_latest_snapshot'].includes(name)) {
       try {
         return await mergeReadTool(message, original);
       } catch (error) {
-        console.error(`[MCP v7] merge ${name} failed`, error?.message || error);
+        console.error(`[MCP v7.1] merge ${name} failed`, error?.message || error);
         return original;
       }
     }
@@ -329,6 +357,7 @@ const server = http.createServer(async (req, res) => {
         name: 'chk-crypto-workspace',
         version: SERVER_VERSION,
         compatibilityReadBridge: true,
+        directBybitWrites: false,
         compatibilityReadTools: ['get_portfolio_summary', 'list_assets', 'get_asset', 'get_latest_snapshot'],
       });
     }
@@ -339,7 +368,8 @@ const server = http.createServer(async (req, res) => {
         version: SERVER_VERSION,
         status: 'online',
         compatibilityReadBridge: true,
-        note: 'Legacy read tools now return Binance + Bybit. Native Bybit write tools require a refreshed full-MCP app snapshot.',
+        directBybitWrites: false,
+        note: 'Binance + Bybit lecture/analyse. Tout ordre réel Bybit doit passer par une proposition CHK Crypto puis une confirmation humaine dans l’APK.',
       });
     }
 
@@ -351,5 +381,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`CHK Crypto Workspace MCP v7 listening on :${PORT}; v6 base on :${INTERNAL_PORT}`);
+  console.log(`CHK Crypto Workspace MCP v7.1 listening on :${PORT}; v6 base on :${INTERNAL_PORT}`);
 });

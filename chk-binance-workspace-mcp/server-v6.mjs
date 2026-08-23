@@ -8,7 +8,7 @@ import { URL } from 'node:url';
 const PORT = Number(process.env.PORT || 3000);
 const INTERNAL_PORT = Number(process.env.V5_MCP_INTERNAL_PORT || (PORT + 1));
 const MCP_LINK_TOKEN = process.env.MCP_LINK_TOKEN;
-const SERVER_VERSION = '6.0.0';
+const SERVER_VERSION = '6.0.1';
 
 if (!MCP_LINK_TOKEN) {
   console.error('Missing required environment variable: MCP_LINK_TOKEN');
@@ -69,8 +69,7 @@ async function v5Fetch(pathname, options = {}) {
   let lastError;
   for (let attempt = 0; attempt < 12; attempt++) {
     try {
-      const r = await fetch(`http://127.0.0.1:${INTERNAL_PORT}${pathname}`, options);
-      return r;
+      return await fetch(`http://127.0.0.1:${INTERNAL_PORT}${pathname}`, options);
     } catch (error) {
       lastError = error;
       if (attempt < 11) await wait(250);
@@ -108,7 +107,7 @@ function upgradeInitialize(response) {
       listChanged: true,
     },
   };
-  response.result.instructions = 'CHK Crypto Workspace v6. Binance + Bybit EU. Bybit exposes live Spot portfolio/market tools, LIMIT and MARKET Spot orders on CRYPTO/USDC after explicit confirmation, plus cancellation. The server advertises tools.listChanged=true so clients must refresh tools/list when capabilities change. No leverage, Futures, transfers or withdrawals.';
+  response.result.instructions = 'CHK Crypto Workspace. Binance + Bybit EU. Bybit exposes live Spot portfolio/market tools, LIMIT and MARKET Spot orders on CRYPTO/USDC after explicit confirmation, plus cancellation. No leverage, Futures, transfers or withdrawals.';
   return response;
 }
 
@@ -184,6 +183,23 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `https://${req.headers.host}`);
 
     if (validMcpPath(url.pathname)) return handleMcp(req, res);
+
+    if (url.pathname === '/debug/tool-names') {
+      const response = await v5Rpc({ jsonrpc: '2.0', id: 'diagnostic-tools-list', method: 'tools/list', params: {} });
+      const tools = Array.isArray(response?.result?.tools) ? response.result.tools : [];
+      return json(res, 200, {
+        ok: true,
+        serverVersion: SERVER_VERSION,
+        total: tools.length,
+        tools: tools.map((tool) => ({
+          name: tool?.name || null,
+          title: tool?.title || null,
+          readOnlyHint: tool?.annotations?.readOnlyHint ?? null,
+          destructiveHint: tool?.annotations?.destructiveHint ?? null,
+          required: Array.isArray(tool?.inputSchema?.required) ? tool.inputSchema.required : [],
+        })),
+      });
+    }
 
     if (url.pathname === '/health') {
       const r = await v5Fetch('/health', { headers: { accept: 'application/json' } });

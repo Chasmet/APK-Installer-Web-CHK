@@ -7,11 +7,13 @@ import { URL } from 'node:url';
 
 const PORT = Number(process.env.PORT || 3000);
 const UPSTREAM_PORT = Number(process.env.V8_INTERNAL_PORT || (PORT + 10));
-const SERVER_VERSION = '9.0.0';
+const SERVER_VERSION = '9.0.1';
 const SIGNING_AUDIENCE = 'chk-crypto-signing';
 const EXPECTED_REPOSITORY = 'Chasmet/Binance-bybyt-';
 const EXPECTED_REF = 'refs/heads/main';
-const EXPECTED_WORKFLOW = 'Chasmet/Binance-bybyt-/.github/workflows/build-apk.yml@refs/heads/main';
+const EXPECTED_WORKFLOW_PREFIX = 'Chasmet/Binance-bybyt-/.github/workflows/build-apk.yml@';
+const ALLOWED_PR_REF = String(process.env.CHK_SIGNING_ALLOWED_PR_REF || '');
+const ALLOWED_HEAD_REF = String(process.env.CHK_SIGNING_ALLOWED_HEAD_REF || '');
 
 const KEYSTORE_B64 = String(process.env.CHK_ANDROID_KEYSTORE_BASE64 || '');
 const STORE_PASSWORD = String(process.env.CHK_ANDROID_STORE_PASSWORD || '');
@@ -76,6 +78,26 @@ function audienceMatches(aud) {
   return Array.isArray(aud) && aud.includes(SIGNING_AUDIENCE);
 }
 
+function workflowRefAllowed(claims, expectedRef) {
+  return String(claims?.workflow_ref || '') === `${EXPECTED_WORKFLOW_PREFIX}${expectedRef}` ||
+    String(claims?.workflow_ref || '') === `${EXPECTED_WORKFLOW_PREFIX}${EXPECTED_REF}`;
+}
+
+function isAllowedMainRun(claims) {
+  return claims?.ref === EXPECTED_REF &&
+    ['push', 'workflow_dispatch'].includes(String(claims?.event_name || '')) &&
+    workflowRefAllowed(claims, EXPECTED_REF);
+}
+
+function isAllowedValidationPr(claims) {
+  if (!ALLOWED_PR_REF || !ALLOWED_HEAD_REF) return false;
+  return claims?.event_name === 'pull_request' &&
+    claims?.ref === ALLOWED_PR_REF &&
+    claims?.head_ref === ALLOWED_HEAD_REF &&
+    claims?.base_ref === 'main' &&
+    workflowRefAllowed(claims, ALLOWED_PR_REF);
+}
+
 async function verifyGithubOidc(jwt) {
   const parts = String(jwt || '').split('.');
   if (parts.length !== 3) throw new Error('invalid_jwt');
@@ -101,9 +123,7 @@ async function verifyGithubOidc(jwt) {
   if (!Number.isFinite(Number(claims?.exp)) || Number(claims.exp) <= now) throw new Error('token_expired');
   if (claims?.nbf && Number(claims.nbf) > now + 30) throw new Error('token_not_yet_valid');
   if (claims?.repository !== EXPECTED_REPOSITORY) throw new Error('repository_not_allowed');
-  if (claims?.ref !== EXPECTED_REF) throw new Error('ref_not_allowed');
-  if (claims?.workflow_ref !== EXPECTED_WORKFLOW) throw new Error('workflow_not_allowed');
-  if (!['push', 'workflow_dispatch'].includes(String(claims?.event_name || ''))) throw new Error('event_not_allowed');
+  if (!isAllowedMainRun(claims) && !isAllowedValidationPr(claims)) throw new Error('run_not_allowed');
   return claims;
 }
 
@@ -114,7 +134,7 @@ async function handleSigning(req, res) {
   if (!auth.startsWith('Bearer ')) return json(res, 401, { error: 'missing_oidc_token' });
   try {
     const claims = await verifyGithubOidc(auth.slice(7).trim());
-    console.log(`Android signing material issued to GitHub Actions repo=${claims.repository} ref=${claims.ref} run_id=${claims.run_id || 'unknown'}`);
+    console.log(`Android signing material issued to GitHub Actions repo=${claims.repository} ref=${claims.ref} head_ref=${claims.head_ref || ''} run_id=${claims.run_id || 'unknown'}`);
     return json(res, 200, {
       ok: true,
       keystoreBase64: KEYSTORE_B64,
@@ -156,7 +176,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/health') {
       const response = await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`);
       const upstream = await response.json();
-      return json(res, 200, { ...upstream, gatewayVersion: SERVER_VERSION, stableSigningConfigured: signingConfigured });
+      return json(res, 200, {
+        ...upstream,
+        gatewayVersion: SERVER_VERSION,
+        stableSigningConfigured: signingConfigured,
+        validationPrEnabled: Boolean(ALLOWED_PR_REF && ALLOWED_HEAD_REF),
+      });
     }
     return proxy(req, res);
   } catch (error) {
@@ -166,5 +191,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`CHK Crypto Gateway v${SERVER_VERSION} listening on :${PORT}; v8 on :${UPSTREAM_PORT}; stableSigningConfigured=${signingConfigured}`);
+  console.log(`CHK Crypto Gateway v${SERVER_VERSION} listening on :${PORT}; v8 on :${UPSTREAM_PORT}; stableSigningConfigured=${signingConfigured}; validationPrEnabled=${Boolean(ALLOWED_PR_REF && ALLOWED_HEAD_REF)}`);
 });

@@ -14,6 +14,7 @@ const BYBIT_CREDENTIALS_KEY = process.env.BYBIT_CREDENTIALS_KEY;
 const BYBIT_MAX_ORDER_USDC = Number(process.env.BYBIT_MAX_ORDER_USDC || 10);
 const BYBIT = 'https://api.bybit.eu';
 const RECV_WINDOW = '5000';
+const SERVER_VERSION = '4.0.1';
 
 for (const [name, value] of Object.entries({ EDGE_URL, SUPABASE_MCP_TOKEN, MCP_LINK_TOKEN, BYBIT_CREDENTIALS_KEY })) {
   if (!value) {
@@ -425,8 +426,39 @@ async function rpcOne(message) {
   if (message.method === 'initialize') {
     const baseResponse = await baseRpc(message);
     if (baseResponse?.result) {
-      baseResponse.result.serverInfo = {name:'chk-crypto-workspace',version:'4.0.0'};
+      baseResponse.result.serverInfo = {name:'chk-crypto-workspace',version:SERVER_VERSION};
       baseResponse.result.instructions = 'Persistent CHK Crypto Workspace. Binance remains read/analysis/alerts. Bybit EU can read live Spot data and, only after explicit user confirmation, place or cancel real Spot LIMIT orders on CRYPTO/USDC pairs. No Market, leverage, Futures, transfers or withdrawals are exposed.';
+    }
+    return baseResponse;
+  }
+  if (message.method === 'tools/call' && message.params?.name === 'get_workspace_info') {
+    const baseResponse = await baseRpc(message);
+    const bybit = await bybitConnectionInfo();
+    if (baseResponse?.result) {
+      const current = baseResponse.result.structuredContent || {};
+      const capabilities = Array.isArray(current.capabilities) ? current.capabilities : [];
+      baseResponse.result.content = [{
+        type:'text',
+        text:bybit.connected
+          ? 'Espace CHK Crypto persistant disponible. Binance et Bybit EU sont reliés.'
+          : 'Espace CHK Crypto persistant disponible. Binance est relié, Bybit EU doit être reconnecté depuis l’APK.',
+      }];
+      baseResponse.result.structuredContent = {
+        ...current,
+        workspaceName:'CHK Crypto Workspace',
+        serverVersion:SERVER_VERSION,
+        bybit,
+        capabilities:[
+          ...new Set([
+            ...capabilities,
+            'Bybit EU live portfolio read',
+            'Bybit EU Spot market analysis',
+            'Bybit EU Spot LIMIT order placement after explicit confirmation',
+            'Bybit EU Spot order cancellation after explicit confirmation',
+          ]),
+        ],
+        note:'Binance reste en lecture/analyse/alertes. Bybit est limité au Spot CRYPTO/USDC, aux ordres LIMIT confirmés, sans levier, Futures, transfert ni retrait.',
+      };
     }
     return baseResponse;
   }
@@ -458,12 +490,12 @@ const server = http.createServer(async (req,res)=>{
     if (url.pathname === '/pair/bybit') return handlePairBybit(req,res);
     if (url.pathname === '/health') {
       const bybit = await bybitConnectionInfo();
-      return json(res,200,{ok:true,name:'chk-crypto-workspace',version:'4.0.0',features:['binance-portfolio','analysis','alerts','bybit-live','bybit-spot-limit-write'],bybit:{connected:bybit.connected,canSpotTrade:bybit.canSpotTrade}});
+      return json(res,200,{ok:true,name:'chk-crypto-workspace',version:SERVER_VERSION,features:['binance-portfolio','analysis','alerts','bybit-live','bybit-spot-limit-write'],bybit:{connected:bybit.connected,canSpotTrade:bybit.canSpotTrade}});
     }
     if (validMcpPath(url.pathname)) return handleMcp(req,res);
     if (url.pathname === '/') {
       const bybit = await bybitConnectionInfo();
-      return json(res,200,{name:'CHK Crypto Workspace MCP',version:'4.0.0',status:'online',bybit:{connected:bybit.connected,canSpotTrade:bybit.canSpotTrade},restrictions:['Spot only','USDC pairs only','Limit only','No leverage','No transfer','No withdrawal',`Max ${BYBIT_MAX_ORDER_USDC} USDC per order`]});
+      return json(res,200,{name:'CHK Crypto Workspace MCP',version:SERVER_VERSION,status:'online',bybit:{connected:bybit.connected,canSpotTrade:bybit.canSpotTrade},restrictions:['Spot only','USDC pairs only','Limit only','No leverage','No transfer','No withdrawal',`Max ${BYBIT_MAX_ORDER_USDC} USDC per order`]});
     }
     return json(res,404,{error:'not_found'});
   } catch (error) {

@@ -111,9 +111,10 @@ async function handleChartCall(msg,name,a){
 
 const analysisExtension=createAnalysisExtension({currentChart,enqueue,handleChartCall,result});
 const instrumentCache=new Map();
-async function tradingInstrument(symbol){
+async function tradingInstrument(symbol,{deadline=Infinity}={}){
  const old=instrumentCache.get(symbol);if(old&&Date.now()-old.at<300000)return old.rules;
- const r=await fetch(`https://api.bybit.eu/v5/market/instruments-info?category=spot&symbol=${encodeURIComponent(symbol)}`,{signal:AbortSignal.timeout(4000)});
+ const remaining=deadline-Date.now();if(remaining<=0)throw new Error('instrument_deadline_exceeded');
+ const r=await fetch(`https://api.bybit.eu/v5/market/instruments-info?category=spot&symbol=${encodeURIComponent(symbol)}`,{signal:AbortSignal.timeout(Math.max(1,Math.min(4000,Math.floor(remaining))))});
  const data=await r.json();const item=data.result?.list?.find(x=>x.symbol===symbol);
  if(!r.ok||Number(data.retCode)!==0||!item)throw new Error('instrument_unavailable');
  const rules={quantityStep:Number(item.lotSizeFilter?.qtyStep||item.lotSizeFilter?.basePrecision),minOrderAmount:Number(item.lotSizeFilter?.minOrderAmt||1)};

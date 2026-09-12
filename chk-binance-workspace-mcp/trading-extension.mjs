@@ -38,19 +38,20 @@ export function createTradingExtension({bridge,accountFingerprint='',readOrder=a
   async function wait(args) {
     const ids=args.proposalIds;
     if(!Array.isArray(ids)||!ids.length||ids.length>MAX_BATCH_ORDERS||new Set(ids).size!==ids.length||ids.some(id=>!uuid(id)))throw new Error('invalid_proposal_ids');
-    const deadline=now()+Math.min(18000,Math.max(0,Number(args.timeoutMs??18000)));
+    const deadline=Math.min(args.deadline??Infinity,now()+Math.min(18000,Math.max(0,Number(args.timeoutMs??18000))));
+    const ioDeadline=args.deadline??deadline+1000;
     let data;
     do{
       try{
-        data=await bridge({action:'wait_trade_batch',proposalIds:ids,timeoutMs:0});
+        data=await bridge({action:'wait_trade_batch',proposalIds:ids,timeoutMs:0},{deadline:ioDeadline});
         const unverified=new Map();
         for(const o of data.orders||[]){
           if(!['processing','executed'].includes(o.proposalStatus)||o.status==='FILLED')continue;
           if(now()>=deadline){if(o.proposalStatus==='executed')unverified.set(o.id,'Délai de vérification atteint.');continue;}
-          try{const observed=await readOrder(o,{deadline});if(observed)await bridge({action:'reconcile_trade_result',id:o.id,observed});else if(o.proposalStatus==='executed')unverified.set(o.id,'OrderLinkId non retrouvé ; état actuel à vérifier.');}
+          try{const observed=await readOrder(o,{deadline});if(observed)await bridge({action:'reconcile_trade_result',id:o.id,observed},{deadline:ioDeadline});else if(o.proposalStatus==='executed')unverified.set(o.id,'OrderLinkId non retrouvé ; état actuel à vérifier.');}
           catch(e){unverified.set(o.id,String(e.message||e));}
         }
-        data={...data,...await bridge({action:'wait_trade_batch',proposalIds:ids,timeoutMs:0}),proposalIds:ids};
+        data={...data,...await bridge({action:'wait_trade_batch',proposalIds:ids,timeoutMs:0},{deadline:ioDeadline}),proposalIds:ids};
         if(unverified.size){
           data.orders=data.orders.map(o=>unverified.has(o.id)?{...o,lastKnownStatus:o.status,status:'UNKNOWN',resolved:false,confirmed:false,verificationError:unverified.get(o.id)}:o);
           data.allConfirmed=false;data.reportReady=false;data.pending=data.orders.filter(o=>!o.resolved).length;
@@ -64,21 +65,26 @@ export function createTradingExtension({bridge,accountFingerprint='',readOrder=a
   }
   async function create(args) {
     if(!uuid(args.batchId))throw new Error('invalid_batch_id');
-    const orders=await prepareOrders(args.orders,instrument);
+    const deadline=now()+18000;
+    const orders=await prepareOrders(args.orders,async symbol=>{
+      if(now()>=deadline)throw new Error('instrument_deadline_exceeded');
+      return instrument(symbol,{deadline});
+    });
     const ids=proposalIdsForBatch(accountFingerprint,args.batchId,orders.length);
     let saved;
-    try{saved=await bridge({action:'create_trade_batch',batchId:args.batchId,orders});}
+    try{saved=await bridge({action:'create_trade_batch',batchId:args.batchId,orders},{deadline});}
     catch(e){if(e.retryable===false)throw e;return {...pending(ids,e),batchId:args.batchId,creationUncertain:true,retryBatch:{batchId:args.batchId,orders}};}
-    return {...saved,...await wait({proposalIds:saved.proposalIds||ids,timeoutMs:args.timeoutMs}),batchId:args.batchId,expandedOrderCount:orders.length};
+    return {...saved,...await wait({proposalIds:saved.proposalIds||ids,timeoutMs:args.timeoutMs,deadline}),batchId:args.batchId,expandedOrderCount:orders.length};
   }
   async function handle(msg,name,args) {
     try{
       if(name==='create_note'){const parsed=JSON.parse(args.content||'{}');name=args.kind==='TRADE_BATCH'?'create_trade_batch':'wait_trade_batch';args=parsed;}
       if(name==='list_trade_proposals'){
-        const data=await bridge({action:'list_trade_proposals',limit:args.limit??100});
+        const deadline=now()+18000;
+        const data=await bridge({action:'list_trade_proposals',limit:args.limit??100},{deadline});
         const ids=(data.proposals||[]).filter(p=>p.status==='processing').slice(0,20).map(p=>p.id);
-        const verification=ids.length?await wait({proposalIds:ids,timeoutMs:12000}):null;
-        const refreshed=verification?await bridge({action:'list_trade_proposals',limit:args.limit??100}):data;
+        const verification=ids.length?await wait({proposalIds:ids,timeoutMs:12000,deadline}):null;
+        const refreshed=verification&&now()<deadline?await bridge({action:'list_trade_proposals',limit:args.limit??100},{deadline}):data;
         const sc={...refreshed,verification};return reply(msg,{structuredContent:sc,content:[{type:'text',text:TRADING_INSTRUCTIONS+'\n'+JSON.stringify(sc)}]});
       }
       if(name==='create_cancel_proposal'){
@@ -111,16 +117,18 @@ export function createTradingExtension({bridge,accountFingerprint='',readOrder=a
 }
 export function createTradeBridge({edgeUrl,token,accountFingerprint,fetchImpl=fetch}) {
   const url=new URL(edgeUrl);url.pathname=url.pathname.replace(/\/chk-binance-workspace-latest\/?$/, '/chk-mcp-bridge');
-  return async payload=>{
+  return async (payload,{deadline=Infinity}={})=>{
     for(let attempt=0;;attempt++){
       try{
+        const remaining=deadline-Date.now();
+        if(remaining<=0)throw new Error('trade_bridge_deadline_exceeded');
         const r=await fetchImpl(url,{method:'POST',headers:{'content-type':'application/json','x-chk-internal-token':token},
-          body:JSON.stringify({...payload,accountFingerprint}),signal:AbortSignal.timeout(6000)});
+          body:JSON.stringify({...payload,accountFingerprint}),signal:AbortSignal.timeout(Math.max(1,Math.min(6000,Math.floor(remaining))))});
         const data=await r.json();
         if(!r.ok){const e=new Error(`Trade bridge HTTP ${r.status}: ${data.error||data.message||'erreur'}`);e.retryable=r.status>=500||r.status===429;throw e;}
         return data;
       }catch(e){const safe=['wait_trade_batch','list_trade_proposals','reconcile_trade_result','create_trade_batch'].includes(payload.action);
-        if(attempt>=1||!safe||e.retryable===false)throw e;await new Promise(r=>setTimeout(r,250));}
+        if(attempt>=1||!safe||e.retryable===false||deadline-Date.now()<=250)throw e;await new Promise(r=>setTimeout(r,250));}
     }
   };
 }

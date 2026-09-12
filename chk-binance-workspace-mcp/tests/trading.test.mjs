@@ -110,3 +110,32 @@ test('cancel replacement accepts 30 USDC and keeps an uncertain response discove
  assert.equal(sent[0].replacementQuoteAmountUsdc,30);assert.equal(out.result.structuredContent.nextTool,'list_cancel_proposals');
  assert.equal(sent.length,1);
 });
+
+test('an exhausted tool deadline aborts a slow bridge without a second request',async()=>{
+ let requests=0;
+ const keepAlive=setTimeout(()=>{},5000);
+ const bridge=createTradeBridge({edgeUrl:'https://example.test/functions/v1/chk-binance-workspace-latest',token:'dummy',accountFingerprint:account,
+  fetchImpl:async(url,init)=>{requests++;return new Promise((resolve,reject)=>{
+   init.signal.addEventListener('abort',()=>reject(init.signal.reason),{once:true});
+  });}});
+ try{
+  await assert.rejects(bridge({action:'wait_trade_batch'},{deadline:Date.now()+150}));
+  assert.equal(requests,1);
+  await assert.rejects(bridge({action:'create_trade_batch'},{deadline:Date.now()-1}),/deadline_exceeded/);
+  assert.equal(requests,1);
+ }finally{clearTimeout(keepAlive);}
+});
+test('slow batch acceptance consumes the shared wait budget and preserves resumable IDs',async()=>{
+ let clock=0,creates=0;
+ const ext=createTradingExtension({accountFingerprint:account,now:()=>clock,sleep:async ms=>{clock+=ms;},
+  bridge:async(p,options)=>{
+   if(clock>=options.deadline)throw new Error('deadline');
+   if(p.action==='create_trade_batch'){creates++;clock=17900;return{proposalIds:[proposalId]};}
+   clock+=100;throw new Error('offline');
+  }});
+ const out=await ext.handle({id:1},'create_trade_batch',{batchId,orders:[order]});
+ assert.equal(creates,1);assert.equal(clock,18000);
+ assert.equal(out.result.structuredContent.reportReady,false);
+ assert.deepEqual(out.result.structuredContent.proposalIds,[proposalId]);
+ assert.equal(out.result.structuredContent.nextTool,'wait_trade_batch');
+});

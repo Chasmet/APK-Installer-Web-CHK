@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server-v16.mjs"
+    "start": "node server-v18.mjs"
   },
   "engines": {
     "node": ">=20"

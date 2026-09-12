@@ -6,11 +6,13 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { createAnalysisExtension } from './analysis-tools-v17.mjs';
 import { createTradingExtension, createTradeBridge, TRADING_INSTRUCTIONS } from './trading-extension.mjs';
+import {MAX_ORDER_USDC,CATALOG_VERSION} from './trading-config.mjs';
+import {createBybitOrderReader} from './bybit-order-reader.mjs';
 
 const PORT=Number(process.env.PORT||3000);
 const UPSTREAM_PORT=Number(process.env.V16_UPSTREAM_PORT||(PORT+10));
 const SIGNING_UPSTREAM_PORT=UPSTREAM_PORT+30;
-const SERVER_VERSION='17.2.0';
+const SERVER_VERSION=CATALOG_VERSION;
 const BYBIT_API_KEY=String(process.env.BYBIT_API_KEY||'').trim();
 const CHK_INTERNAL_TOKEN=String(process.env.CHK_INTERNAL_TOKEN||'');
 const MCP_LINK_TOKEN=String(process.env.MCP_LINK_TOKEN||'');
@@ -108,7 +110,18 @@ async function handleChartCall(msg,name,a){
 }
 
 const analysisExtension=createAnalysisExtension({currentChart,enqueue,handleChartCall,result});
-const tradingExtension=createTradingExtension({bridge:createTradeBridge({edgeUrl:EDGE_URL,token:CHK_INTERNAL_TOKEN,accountFingerprint:ACCOUNT_FINGERPRINT})});
+const instrumentCache=new Map();
+async function tradingInstrument(symbol){
+ const old=instrumentCache.get(symbol);if(old&&Date.now()-old.at<300000)return old.rules;
+ const r=await fetch(`https://api.bybit.eu/v5/market/instruments-info?category=spot&symbol=${encodeURIComponent(symbol)}`,{signal:AbortSignal.timeout(4000)});
+ const data=await r.json();const item=data.result?.list?.find(x=>x.symbol===symbol);
+ if(!r.ok||Number(data.retCode)!==0||!item)throw new Error('instrument_unavailable');
+ const rules={quantityStep:Number(item.lotSizeFilter?.qtyStep||item.lotSizeFilter?.basePrecision),minOrderAmount:Number(item.lotSizeFilter?.minOrderAmt||1)};
+ instrumentCache.set(symbol,{at:Date.now(),rules});return rules;
+}
+const tradingExtension=createTradingExtension({accountFingerprint:ACCOUNT_FINGERPRINT,instrument:tradingInstrument,
+ readOrder:createBybitOrderReader({apiKey:BYBIT_API_KEY,apiSecret:String(process.env.BYBIT_API_SECRET||'').trim()}),
+ bridge:createTradeBridge({edgeUrl:EDGE_URL,token:CHK_INTERNAL_TOKEN,accountFingerprint:ACCOUNT_FINGERPRINT})});
 
 const TF_MAP={"1m":"1","5m":"5","15m":"15","1h":"60","4h":"240","1d":"D","1w":"W"};
 async function fetchBybitKlines(symbol,tf,limit){let last;for(const base of ['https://api.bybit.eu','https://api.bybit.com']){try{const u=`${base}/v5/market/kline?category=spot&symbol=${encodeURIComponent(symbol)}&interval=${TF_MAP[tf]}&limit=${limit}`;const r=await fetch(u,{headers:{accept:'application/json','user-agent':'CHK-Crypto-MCP-v17.1'}});const j=await r.json();if(!r.ok||Number(j.retCode)!==0)throw new Error(j.retMsg||`HTTP ${r.status}`);return (j?.result?.list||[]).map(x=>({time:Number(x[0]),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])})).filter(x=>Object.values(x).every(Number.isFinite)).sort((a,b)=>a.time-b.time);}catch(e){last=e;}}throw last||new Error('Bybit kline unavailable');}
@@ -125,8 +138,8 @@ async function handleOne(msg,requestPath='/mcp'){
  if(msg?.method==='tools/list'){const out=await upstreamRpc(msg);const tools=Array.isArray(out?.result?.tools)?out.result.tools:[];for(const t of chartTools)if(!tools.some(x=>x?.name===t.name))tools.push(t);for(const t of analysisExtension.tools)if(!tools.some(x=>x?.name===t.name))tools.push(t);if(out?.result)out.result.tools=tradingExtension.patchTools(tools);console.log(`[MCP v17.1] tools/list count=${tools.length} chart=${chartTools.length} analysis=${analysisExtension.tools.length}`);return out;}
  if(msg?.method!=='tools/call')return upstreamRpc(msg);
  const name=String(msg?.params?.name||'');const args=msg?.params?.arguments||{};
- if(tradingExtension.names.has(name))return tradingExtension.handle(msg,name,args);
- if(name==='get_workspace_info'){const out=await upstreamRpc(msg);if(out?.result){out.result.structuredContent={...(out.result.structuredContent||{}),maxOrderUsdc:30,batchOrders:{available:true,requiredApkVersion:'0.9.9+',createTool:'create_trade_batch',waitTool:'wait_trade_batch'}};out.result.content=[...(out.result.content||[]),{type:'text',text:TRADING_INSTRUCTIONS}];}return out;}
+ if(tradingExtension.names.has(name)||tradingExtension.isCompatibilityCall(name,args))return tradingExtension.handle(msg,name,args);
+ if(name==='get_workspace_info'){const out=await upstreamRpc(msg);if(out?.result){out.result.structuredContent={...(out.result.structuredContent||{}),maxOrderUsdc:MAX_ORDER_USDC,executionPolicy:'proposal -> bot APK auto-confirm si autorisé -> Bybit -> vérification OrderLinkId -> résultat MCP',catalogVersion:CATALOG_VERSION,batchOrders:{available:true,requiredApkVersion:'0.9.10+',catalogVersion:CATALOG_VERSION,compatibilityTool:'create_note',compatibilityKind:'TRADE_BATCH',createTool:'create_trade_batch',waitTool:'wait_trade_batch'}};out.result.content=[...(out.result.content||[]),{type:'text',text:TRADING_INSTRUCTIONS}];}return out;}
  if(analysisExtension.names.has(name))return analysisExtension.handle(msg,name,args);
  if(!names.has(name))return upstreamRpc(msg);
  return handleChartCall(msg,name,args);
@@ -134,6 +147,12 @@ async function handleOne(msg,requestPath='/mcp'){
 async function proxy(req,res,raw){const target=new URL(req.url,`http://127.0.0.1:${UPSTREAM_PORT}`);const r=await fetch(target,{method:req.method,headers:{...(req.headers['content-type']?{'content-type':req.headers['content-type']}:{}),...(req.headers.accept?{accept:req.headers.accept}:{}),...(req.headers['mcp-protocol-version']?{'mcp-protocol-version':req.headers['mcp-protocol-version']}:{})},body:raw});const text=await r.text();res.writeHead(r.status,{'content-type':r.headers.get('content-type')||'application/json; charset=utf-8','cache-control':'no-store'});res.end(text);}
 async function proxySigning(req,res,raw){const r=await fetch(`http://127.0.0.1:${SIGNING_UPSTREAM_PORT}/ci/android-signing`,{method:req.method,headers:{...(req.headers.authorization?{authorization:req.headers.authorization}:{}),...(req.headers.accept?{accept:req.headers.accept}:{})},body:raw});const text=await r.text();res.writeHead(r.status,{'content-type':r.headers.get('content-type')||'application/json; charset=utf-8','cache-control':'no-store'});res.end(text);}
 async function waitForUpstream(){for(let i=0;i<120;i++){try{const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`);if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,250));}throw new Error('v15_startup_timeout');}
-const server=http.createServer(async(req,res)=>{try{const raw=req.method==='GET'||req.method==='HEAD'?undefined:await bodyText(req);const u=new URL(req.url,`https://${req.headers.host}`);if(u.pathname==='/ci/android-signing')return proxySigning(req,res,raw);if(u.pathname.startsWith('/mcp/')&&!validLegacyMcpPath(u.pathname))return json(res,403,{error:'mcp_forbidden'});if(isMcpPath(u.pathname)&&req.method==='POST'){let parsed;try{parsed=JSON.parse(raw||'{}');}catch{return json(res,400,{jsonrpc:'2.0',id:null,error:{code:-32700,message:'Parse error'}});}const out=Array.isArray(parsed)?await Promise.all(parsed.map(x=>handleOne(x,u.pathname))):await handleOne(parsed,u.pathname);return json(res,200,out,{'mcp-protocol-version':'2025-06-18'});}if(u.pathname==='/debug/tool-names')return json(res,200,{version:SERVER_VERSION,chartTools:chartTools.map(t=>t.name),analysisTools:analysisExtension.tools.map(t=>t.name),chartToolCount:chartTools.length,analysisToolCount:analysisExtension.tools.length});if(u.pathname==='/health'){let upstream={};try{const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`);upstream=await r.json();}catch{}return json(res,200,{...upstream,gatewayVersion:SERVER_VERSION,chartControl:true,chartSnapshotPng:true,multiTimeframe:true,legacyTokenizedMcpCompat:true,toolListChanged:true,signingOidcPassthrough:true,analysisMcpComplete:true,remoteAnalysisScroll:true,batchOrders:true,maxOrderUsdc:30,exactAnalysisTools:['get_analysis_chart_state','set_chart_timeframe','zoom_chart','pan_chart','set_indicator','scroll_analysis_view']});}return proxy(req,res,raw);}catch(e){console.error('v17_1_request_error',e?.stack||e?.message||e);return json(res,500,{error:'server_error',message:String(e?.message||e).slice(0,260)});}});
+const server=http.createServer(async(req,res)=>{try{const raw=req.method==='GET'||req.method==='HEAD'?undefined:await bodyText(req);const u=new URL(req.url,`https://${req.headers.host}`);if(u.pathname==='/ci/android-signing')return proxySigning(req,res,raw);if(u.pathname.startsWith('/mcp/')&&!validLegacyMcpPath(u.pathname))return json(res,403,{error:'mcp_forbidden'});if(isMcpPath(u.pathname)&&req.method==='GET'&&String(req.headers.accept||'').includes('text/event-stream')){
+ res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-store','x-accel-buffering':'no'});
+ res.write('event: message\ndata: '+JSON.stringify({jsonrpc:'2.0',method:'notifications/tools/list_changed'})+'\n\n');
+ const heartbeat=setInterval(()=>res.write(': keepalive\n\n'),15000);
+ const close=setTimeout(()=>res.end(),55000);res.on('close',()=>{clearInterval(heartbeat);clearTimeout(close);});return;
+}if(isMcpPath(u.pathname)&&req.method==='POST'){let parsed;try{parsed=JSON.parse(raw||'{}');}catch{return json(res,400,{jsonrpc:'2.0',id:null,error:{code:-32700,message:'Parse error'}});}if(!Array.isArray(parsed)&&parsed.id===undefined&&String(parsed.method||'').startsWith('notifications/')){res.writeHead(202);return res.end();}const out=Array.isArray(parsed)?await Promise.all(parsed.map(x=>handleOne(x,u.pathname))):await handleOne(parsed,u.pathname);return json(res,200,out,{'mcp-protocol-version':'2025-06-18'});}if(u.pathname==='/debug/tool-names')return json(res,200,{version:SERVER_VERSION,chartTools:chartTools.map(t=>t.name),analysisTools:analysisExtension.tools.map(t=>t.name),chartToolCount:chartTools.length,analysisToolCount:analysisExtension.tools.length,tradingTools:[...tradingExtension.names],maxOrderUsdc:MAX_ORDER_USDC});if(u.pathname==='/health'){let upstream={};try{const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`);upstream=await r.json();}catch{}return json(res,200,{...upstream,gatewayVersion:SERVER_VERSION,chartControl:true,chartSnapshotPng:true,multiTimeframe:true,legacyTokenizedMcpCompat:true,toolListChanged:true,signingOidcPassthrough:true,analysisMcpComplete:true,remoteAnalysisScroll:true,batchOrders:true,maxOrderUsdc:MAX_ORDER_USDC,exactAnalysisTools:['get_analysis_chart_state','set_chart_timeframe','zoom_chart','pan_chart','set_indicator','scroll_analysis_view']});}return proxy(req,res,raw);}catch(e){console.error('v17_1_request_error',e?.stack||e?.message||e);return json(res,500,{error:'server_error',message:String(e?.message||e).slice(0,260)});}});
 try{await waitForUpstream();server.listen(PORT,'0.0.0.0',()=>console.log(`CHK Crypto Gateway v${SERVER_VERSION} integrated Analyse control on :${PORT}`));}catch(e){console.error(e);child.kill('SIGTERM');process.exit(1);}
+
 

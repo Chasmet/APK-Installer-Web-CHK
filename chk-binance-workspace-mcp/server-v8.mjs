@@ -1,3 +1,4 @@
+import {MAX_ORDER_USDC} from './trading-config.mjs';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -14,7 +15,7 @@ const BINANCE_API_KEY = String(process.env.BINANCE_API_KEY || '').trim();
 const BINANCE_API_SECRET = String(process.env.BINANCE_API_SECRET || '').trim();
 const BYBIT_API_KEY = String(process.env.BYBIT_API_KEY || '').trim();
 const BYBIT_API_SECRET = String(process.env.BYBIT_API_SECRET || '').trim();
-const BYBIT_MAX_ORDER_USDC = Number(process.env.BYBIT_MAX_ORDER_USDC || 10);
+const BYBIT_MAX_ORDER_USDC = MAX_ORDER_USDC;
 const SERVER_VERSION = '8.0.0';
 const BINANCE = 'https://api.binance.com';
 const BYBIT = 'https://api.bybit.eu';
@@ -1001,3 +1002,4 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`CHK Crypto Workspace v${SERVER_VERSION} listening on :${PORT}; credentials=Render env; v6 legacy on :${INTERNAL_PORT}`);
 });
+

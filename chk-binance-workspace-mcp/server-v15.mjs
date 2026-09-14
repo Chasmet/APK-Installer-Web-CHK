@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { URL } from 'node:url';
 import {binanceMarketTools,binanceMarketToolNames,handleBinanceMarketTool} from './binance-market-tools.mjs';
+import {trackingTools,trackingToolNames,createTrackingHandler} from './tracking-tools.mjs';
 
 const PORT=Number(process.env.PORT||3000);
 const UPSTREAM_PORT=Number(process.env.V15_UPSTREAM_PORT||(PORT+10));
-const SERVER_VERSION='15.3.0';
+const SERVER_VERSION='15.4.0';
 const BYBIT_API_KEY=String(process.env.BYBIT_API_KEY||'').trim();
 const CHK_INTERNAL_TOKEN=String(process.env.CHK_INTERNAL_TOKEN||'');
 const MCP_LINK_TOKEN=String(process.env.MCP_LINK_TOKEN||'');
@@ -30,7 +31,7 @@ function isCanonicalMcpPath(p){return p==='/mcp'||validLegacyMcpPath(p);}
 function json(res,status,data,extra={}){const body=JSON.stringify(data);res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-length':Buffer.byteLength(body),...extra});res.end(body);}
 async function bodyText(req,max=1_000_000){let body='';for await(const chunk of req){body+=chunk;if(body.length>max)throw new Error('request_too_large');}return body;}
 function bridgeUrl(){const u=new URL(EDGE_URL);u.pathname=u.pathname.replace(/\/chk-binance-workspace-latest\/?$/,`/chk-mcp-bridge`);return u.toString();}
-async function bridge(payload){const r=await fetch(bridgeUrl(),{method:'POST',headers:{'content-type':'application/json','x-chk-internal-token':CHK_INTERNAL_TOKEN,accept:'application/json','user-agent':'chk-crypto-workspace-v15.3'},body:JSON.stringify(payload)});const text=await r.text();let data;try{data=JSON.parse(text||'{}');}catch{data={raw:text};}if(!r.ok)throw new Error(`chk-mcp-bridge ${r.status}: ${data?.error||data?.message||text.slice(0,180)}`);return data;}
+async function bridge(payload){const r=await fetch(bridgeUrl(),{method:'POST',headers:{'content-type':'application/json','x-chk-internal-token':CHK_INTERNAL_TOKEN,accept:'application/json','user-agent':'chk-crypto-workspace-v15.4'},body:JSON.stringify(payload)});const text=await r.text();let data;try{data=JSON.parse(text||'{}');}catch{data={raw:text};}if(!r.ok)throw new Error(`chk-mcp-bridge ${r.status}: ${data?.error||data?.message||text.slice(0,180)}`);return data;}
 async function upstreamRpc(msg){const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/mcp`,{method:'POST',headers:{'content-type':'application/json','mcp-protocol-version':'2025-06-18',accept:'application/json'},body:JSON.stringify(msg)});const text=await r.text();if(!r.ok)throw new Error(`v14 ${r.status}: ${text.slice(0,180)}`);return JSON.parse(text||'{}');}
 function result(id,data,text){return{jsonrpc:'2.0',id,result:{content:[{type:'text',text}],structuredContent:data}};}
 function cleanSymbol(v){const s=String(v||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,30);if(!s.endsWith('USDC')||s==='USDCUSDC')throw new Error('Seules les paires CRYPTO/USDC sont autorisées');return s;}
@@ -42,6 +43,7 @@ const alertTools=[
  {name:'delete_alert',title:'Supprimer une alarme CHK Crypto',description:'Supprime réellement une alarme de l’onglet Alarmes CHK Crypto.',inputSchema:{type:'object',properties:{id:{type:'string'}},required:['id'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false}},
 ];
 const handled=new Set(alertTools.map(t=>t.name));
+const trackingHandler=createTrackingHandler({edgeUrl:EDGE_URL,token:CHK_INTERNAL_TOKEN,accountFingerprint:sha256(BYBIT_API_KEY)});
 
 async function handleOne(msg,requestPath='/mcp'){
  if(msg?.method==='initialize'){
@@ -50,22 +52,24 @@ async function handleOne(msg,requestPath='/mcp'){
    out.result.serverInfo={name:'chk-crypto-workspace',version:SERVER_VERSION};
    out.result.capabilities=out.result.capabilities||{};
    out.result.capabilities.tools={...(out.result.capabilities.tools||{}),listChanged:true};
-   out.result.instructions='CHK Crypto v15.3. Le MCP gère portefeuille, marchés, notes, propositions d’ordres, annulations et alarmes. Outils Binance publics disponibles : get_binance_market_snapshot et get_binance_orderbook pour ticker, bid/ask, profondeur, gros murs, volume 24h et bougies 1m/5m/15m/1h/4h/1d/1w. Ces lectures Binance ne nécessitent aucune clé privée. Outils alarmes : create_alert, list_alerts, update_alert, delete_alert. IMPORTANT compatibilité cache ChatGPT: si ces outils ne sont pas visibles mais create_note/list_notes le sont, créer une alarme avec create_note kind=ALERT et content JSON {"symbol":"ADAUSDC","condition":"below","target_price":0.216,"label":"...","rationale":"...","one_shot":true}; modifier avec kind=ALERT_UPDATE et supprimer avec kind=ALERT_DELETE. list_notes retourne également le tableau alerts. Les alarmes sont réellement synchronisées dans l’onglet Alarmes. Aucun ordre réel sans confirmation utilisateur dans l’APK.';
+   out.result.instructions='CHK Crypto v15.4. Le MCP gère portefeuille, marchés, notes, propositions d’ordres, annulations, alarmes et l’espace Tracking. Tracking fonctionne sur le téléphone, même écran éteint avec Internet, uniquement pour les cryptos réellement détenues. Les WebSockets carnet/trades Binance et Bybit restent sur le téléphone : Render ne transporte jamais le flux brut. ChatGPT peut lire murs, fingerprints, historique, matches Binance↔Bybit, coupures et Carnet Tracking, et peut activer/désactiver Tracking, régler les seuils et gérer les notes Tracking. Outils Binance publics disponibles : get_binance_market_snapshot et get_binance_orderbook pour ticker, bid/ask, profondeur, gros murs, volume 24h et bougies 1m/5m/15m/1h/4h/1d/1w. Ces lectures Binance ne nécessitent aucune clé privée. Aucun score de fingerprint ne constitue une identification certaine d’un trader.';
   }
-  console.log(`[MCP v15.3] initialize path=${requestPath==='/mcp'?'canonical':'legacy-tokenized'}`);
+  console.log(`[MCP v15.4] initialize path=${requestPath==='/mcp'?'canonical':'legacy-tokenized'}`);
   return out;
  }
  if(msg?.method==='tools/list'){
   const out=await upstreamRpc(msg);const tools=Array.isArray(out?.result?.tools)?out.result.tools:[];
   for(const t of alertTools)if(!tools.some(x=>x?.name===t.name))tools.push(t);
   for(const t of binanceMarketTools)if(!tools.some(x=>x?.name===t.name))tools.push(t);
+  for(const t of trackingTools)if(!tools.some(x=>x?.name===t.name))tools.push(t);
   if(out?.result)out.result.tools=tools;
-  console.log(`[MCP v15.3] tools/list path=${requestPath==='/mcp'?'canonical':'legacy-tokenized'} count=${tools.length} alerts=${alertTools.map(t=>t.name).join(',')} binance=${binanceMarketTools.map(t=>t.name).join(',')}`);
+  console.log(`[MCP v15.4] tools/list path=${requestPath==='/mcp'?'canonical':'legacy-tokenized'} count=${tools.length} alerts=${alertTools.length} binance=${binanceMarketTools.length} tracking=${trackingTools.length}`);
   return out;
  }
  if(msg?.method!=='tools/call')return upstreamRpc(msg);
  const name=String(msg?.params?.name||'');
  const a=msg?.params?.arguments||{};
+ if(trackingToolNames.has(name))return trackingHandler.handle(msg,name,a);
  if(binanceMarketToolNames.has(name))return handleBinanceMarketTool(msg,name,a);
  if(!handled.has(name))return upstreamRpc(msg);
  const accountFingerprint=sha256(BYBIT_API_KEY);
@@ -84,7 +88,7 @@ const server=http.createServer(async(req,res)=>{try{const raw=req.method==='GET'
   const out=Array.isArray(parsed)?await Promise.all(parsed.map(x=>handleOne(x,u.pathname))):await handleOne(parsed,u.pathname);
   return json(res,200,out,{'mcp-protocol-version':'2025-06-18'});
  }
- if(u.pathname==='/health'){let upstream={};try{const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`);upstream=await r.json();}catch{}return json(res,200,{...upstream,gatewayVersion:SERVER_VERSION,alertManagement:true,legacyTokenizedMcpCompat:true,toolListChanged:true,expectedAlertTools:alertTools.map(t=>t.name),alarmCompatibilityViaNotes:true,binancePublicMarketData:true,expectedBinanceMarketTools:binanceMarketTools.map(t=>t.name)});}
+ if(u.pathname==='/health'){let upstream={};try{const r=await fetch(`http://127.0.0.1:${UPSTREAM_PORT}/health`);upstream=await r.json();}catch{}return json(res,200,{...upstream,gatewayVersion:SERVER_VERSION,alertManagement:true,legacyTokenizedMcpCompat:true,toolListChanged:true,expectedAlertTools:alertTools.map(t=>t.name),alarmCompatibilityViaNotes:true,binancePublicMarketData:true,expectedBinanceMarketTools:binanceMarketTools.map(t=>t.name),trackingAvailable:true,trackingRunsOnDevice:true,trackingRawDataViaRender:false,trackedAssetsMode:'PORTFOLIO_HOLDINGS_ONLY',expectedTrackingTools:trackingTools.map(t=>t.name)});}
  return proxy(req,res,raw);
 }catch(e){console.error('v15_request_error',e?.message||e);return json(res,500,{error:'server_error',message:String(e?.message||e).slice(0,200)});}});
-try{await waitForUpstream();server.listen(PORT,'0.0.0.0',()=>console.log(`CHK Crypto Gateway v${SERVER_VERSION} alerts + Binance public market data on :${PORT}`));}catch(e){console.error(e);child.kill('SIGTERM');process.exit(1);}
+try{await waitForUpstream();server.listen(PORT,'0.0.0.0',()=>console.log(`CHK Crypto Gateway v${SERVER_VERSION} alerts + Binance public market + on-device Tracking on :${PORT}`));}catch(e){console.error(e);child.kill('SIGTERM');process.exit(1);}

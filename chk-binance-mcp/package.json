@@ -1,0 +1,12 @@
+{
+  "name": "chk-binance-mcp",
+  "version": "99.0.0-deprecated",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node deprecated.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

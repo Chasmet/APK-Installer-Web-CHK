@@ -3,7 +3,7 @@ import {batchTools,handleBatchTool} from './batch-tools.mjs';
 import {MAX_ORDER_USDC,MAX_BATCH_ORDERS,orderLinkId} from './trading-config.mjs';
 import {prepareOrders} from './order-splitting.mjs';
 
-export const TRADING_INSTRUCTIONS = `Plafond par ordre ${MAX_ORDER_USDC} USDC. Flux : proposition → bot APK auto-confirm si autorisé → Bybit → vérification par OrderLinkId. Pour plusieurs ordres, envoyer TOUS les éléments dans create_trade_batch avec un batchId UUID stable. Découpage automatique au plafond et au pas Bybit. Après timeout/HTTP 500 : wait_trade_batch avec les mêmes proposalIds, aucun nouvel ordre. reportReady=false : suivi intermédiaire, poursuivre sans demander de répéter la demande. Rapporter chaque état OPEN/PARTIALLY_FILLED/FILLED/REJECTED/FAILED ou le blocage exact. OPEN ne signifie pas FILLED. Budgets quotidiens Android conservés. Catalogue ChatGPT ancien : create_note(kind="TRADE_BATCH",content=JSON.stringify({batchId,orders})) crée le même lot autorisé ; create_note(kind="TRADE_BATCH_STATUS",content=JSON.stringify({proposalIds})) reprend le suivi. Ces kinds ne créent pas de note et TRADE_BATCH peut déclencher Auto-Trade : respecter la demande utilisateur.`;
+export const TRADING_INSTRUCTIONS = `Plafond par ordre ${MAX_ORDER_USDC} USDC. États obligatoires et séparés : PLACED=ordre soumis/identifié mais état marché pas encore finalisé, OPEN=ordre ouvert Bybit, PARTIAL=partiellement exécuté, FILLED=entièrement exécuté. Ne jamais assimiler PLACED/OPEN/PARTIAL à FILLED. P&L et transactions CHK ne comptent que les FILLED confirmés par Bybit. Flux : proposition → bot APK auto-confirm si autorisé → Bybit → vérification par OrderLinkId. Pour plusieurs ordres, envoyer TOUS les éléments dans create_trade_batch avec un batchId UUID stable. Découpage automatique au plafond et au pas Bybit. Après timeout/HTTP 500 : wait_trade_batch avec les mêmes proposalIds, aucun nouvel ordre. reportReady=false : suivi intermédiaire, poursuivre sans demander de répéter la demande. Pour toute annulation automatique, create_cancel_proposal exige intent=CANCEL ou intent=REPLACE explicite ; aucune intention n'est déduite. L'APK reste en ANALYSIS_ONLY pour Auto-Cancel tant que l'utilisateur n'active pas séparément l'exécution. Catalogue ChatGPT ancien : create_note(kind="TRADE_BATCH",content=JSON.stringify({batchId,orders})) crée le même lot autorisé ; create_note(kind="TRADE_BATCH_STATUS",content=JSON.stringify({proposalIds})) reprend le suivi. Ces kinds ne créent pas de note et TRADE_BATCH peut déclencher Auto-Trade : respecter la demande utilisateur.`;
 export function proposalIdsForBatch(account,batchId,count) {
   return Array.from({length:count},(_,i)=>{
     const h=crypto.createHash('sha256').update(`${account}:${batchId}:${i}`).digest('hex').slice(0,32);
@@ -13,7 +13,7 @@ export function proposalIdsForBatch(account,batchId,count) {
 const uuid=v=>/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
 const reply=(msg,data)=>({jsonrpc:'2.0',id:msg.id,result:data});
 const pending=(ids,e)=>({ok:true,allConfirmed:false,reportReady:false,proposalIds:ids,total:ids.length,confirmed:0,pending:ids.length,
-  orders:ids.map(id=>({id,orderLinkId:orderLinkId(id),status:'UNKNOWN',confirmed:false,resolved:false})),
+  orders:ids.map(id=>({id,orderLinkId:orderLinkId(id),status:'UNKNOWN',lifecycleStatus:'UNKNOWN',confirmed:false,resolved:false,countsForPnlOrTransactions:false})),
   verificationError:String(e?.message||e),retryable:true,nextTool:'wait_trade_batch',nextArguments:{proposalIds:ids}});
 export function createTradingExtension({bridge,accountFingerprint='',readOrder=async()=>null,instrument=async()=>({}),now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms))}) {
   const names=new Set([...batchTools.map(t=>t.name),'create_trade_proposal','list_trade_proposals','create_cancel_proposal']);
@@ -29,7 +29,14 @@ export function createTradingExtension({bridge,accountFingerprint='',readOrder=a
         t.inputSchema.properties.request_id={type:'string',format:'uuid'};
         t.annotations={readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true};
       }
-      if(t.name==='create_cancel_proposal')t.description=`Annulation d’un Order ID précis. Le bot APK auto-confirme si annuler/remplacer est autorisé. Remplacement <=${MAX_ORDER_USDC} USDC uniquement après annulation Bybit confirmée, sous les limites Android.`;
+      if(t.name==='create_cancel_proposal'){
+        t.description=`Annulation d’un Order ID précis. Exige intention explicite CANCEL ou REPLACE. REPLACE requiert les paramètres du nouvel ordre LIMIT <=${MAX_ORDER_USDC} USDC. L'APK peut rester ANALYSIS_ONLY et refuser toute action réelle même si la proposition existe.`;
+        t.inputSchema=t.inputSchema||{type:'object',properties:{},required:[]};
+        t.inputSchema.properties=t.inputSchema.properties||{};
+        t.inputSchema.properties.intent={type:'string',enum:['CANCEL','REPLACE'],description:'Intention explicite. CANCEL annule seulement ; REPLACE annule puis prépare le remplacement après confirmation Bybit.'};
+        t.inputSchema.required=Array.from(new Set([...(t.inputSchema.required||[]),'intent']));
+        t.annotations={...(t.annotations||{}),readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true};
+      }
       if(t.name==='create_note')t.description+=' Kinds TRADE_BATCH et TRADE_BATCH_STATUS, content JSON : création de propositions pouvant être auto-exécutées ou suivi. '+TRADING_INSTRUCTIONS;
       if(t.name==='list_trade_proposals')t.description='Liste et réconcilie les processing par OrderLinkId sur Bybit. '+TRADING_INSTRUCTIONS;
     }
@@ -53,7 +60,7 @@ export function createTradingExtension({bridge,accountFingerprint='',readOrder=a
         }
         data={...data,...await bridge({action:'wait_trade_batch',proposalIds:ids,timeoutMs:0},{deadline:ioDeadline}),proposalIds:ids};
         if(unverified.size){
-          data.orders=data.orders.map(o=>unverified.has(o.id)?{...o,lastKnownStatus:o.status,status:'UNKNOWN',resolved:false,confirmed:false,verificationError:unverified.get(o.id)}:o);
+          data.orders=data.orders.map(o=>unverified.has(o.id)?{...o,lastKnownStatus:o.status,status:'UNKNOWN',lifecycleStatus:'UNKNOWN',resolved:false,confirmed:false,countsForPnlOrTransactions:false,verificationError:unverified.get(o.id)}:o);
           data.allConfirmed=false;data.reportReady=false;data.pending=data.orders.filter(o=>!o.resolved).length;
           data.verificationWarning='Lecture Bybit indisponible : état actuel à vérifier, aucun nouvel envoi.';
         }
@@ -85,19 +92,22 @@ export function createTradingExtension({bridge,accountFingerprint='',readOrder=a
         const ids=(data.proposals||[]).filter(p=>p.status==='processing').slice(0,20).map(p=>p.id);
         const verification=ids.length?await wait({proposalIds:ids,timeoutMs:12000,deadline}):null;
         const refreshed=verification&&now()<deadline?await bridge({action:'list_trade_proposals',limit:args.limit??100},{deadline}):data;
-        const sc={...refreshed,verification};return reply(msg,{structuredContent:sc,content:[{type:'text',text:TRADING_INSTRUCTIONS+'\n'+JSON.stringify(sc)}]});
+        const sc={...refreshed,verification,lifecyclePolicy:{states:['PLACED','OPEN','PARTIAL','FILLED'],pnlAndTransactionsRequire:'FILLED',sourceOfTruth:'BYBIT'}};return reply(msg,{structuredContent:sc,content:[{type:'text',text:TRADING_INSTRUCTIONS+'\n'+JSON.stringify(sc)}]});
       }
       if(name==='create_cancel_proposal'){
+        const intent=String(args.intent||'').toUpperCase();
+        if(!['CANCEL','REPLACE'].includes(intent))throw new Error('Intention CANCEL ou REPLACE explicite requise');
         const amount=args.replacement_quote_amount_usdc;
         if(amount!=null&&(!Number.isFinite(Number(amount))||Number(amount)<=1||Number(amount)>MAX_ORDER_USDC))throw new Error('invalid_replacement_amount');
+        if(intent==='REPLACE'&&(amount==null||!args.replacement_side||String(args.replacement_order_type||'').toUpperCase()!=='LIMIT'||!Number(args.replacement_limit_price)))throw new Error('REPLACE requiert side, LIMIT, montant et prix de remplacement');
         try{
-          const data=await bridge({action:'create_cancel_proposal',symbol:args.symbol,targetOrderId:args.target_order_id,
+          const data=await bridge({action:'create_cancel_proposal',intent,symbol:args.symbol,targetOrderId:args.target_order_id,
             targetOrderLinkId:args.target_order_link_id??'',rationale:args.rationale,confidence:args.confidence,
             expiresInMinutes:args.expires_in_minutes,replacementSide:args.replacement_side,replacementOrderType:args.replacement_order_type,
             replacementQuoteAmountUsdc:amount,replacementBaseQuantity:args.replacement_base_quantity,replacementLimitPrice:args.replacement_limit_price,
             replacementRationale:args.replacement_rationale,replacementConfidence:args.replacement_confidence});
-          return reply(msg,{structuredContent:data,content:[{type:'text',text:'Demande transmise au bot APK, sous les autorisations annuler/remplacer. Vérifier list_cancel_proposals ; ne pas annoncer l’annulation avant preuve Bybit.\n'+JSON.stringify(data)}]});
-        }catch(e){return reply(msg,{isError:true,structuredContent:{ok:false,creationUncertain:true,targetOrderId:args.target_order_id,nextTool:'list_cancel_proposals'},content:[{type:'text',text:'Réponse indisponible : vérifier list_cancel_proposals pour cet Order ID avant toute nouvelle demande. '+String(e.message||e)}]});}
+          return reply(msg,{structuredContent:{...data,intent,autoCancelSafetyMode:'ANALYSIS_ONLY unless user explicitly enabled execution in APK'},content:[{type:'text',text:`Intention ${intent} transmise au bot APK. ANALYSIS_ONLY peut bloquer l'action réelle. Vérifier list_cancel_proposals ; ne jamais annoncer l’annulation avant preuve Bybit.\n`+JSON.stringify(data)}]});
+        }catch(e){return reply(msg,{isError:true,structuredContent:{ok:false,creationUncertain:true,intent,targetOrderId:args.target_order_id,nextTool:'list_cancel_proposals'},content:[{type:'text',text:'Réponse indisponible : vérifier list_cancel_proposals pour cet Order ID avant toute nouvelle demande. '+String(e.message||e)}]});}
       }
       if(name==='create_trade_proposal'){
         const amount=Number(args.quote_amount_usdc);
